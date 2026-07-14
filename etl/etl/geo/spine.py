@@ -94,7 +94,10 @@ def load_neighborhoods(c, cfg) -> int:
     n_cfg = cfg["neighborhoods"]
     city_id = cfg["city"]["id"]
     def _validate(p: str) -> None:
-        gpd.read_file(p, rows=1)
+        sample = gpd.read_file(p, rows=1)
+        cols = {col.lower() for col in sample.columns}
+        if n_cfg["name_field"].lower() not in cols:
+            raise ValueError(f"missing name field {n_cfg['name_field']!r} (got {sorted(cols)})")
 
     path, used = download(
         n_cfg["url"],
