@@ -6,4 +6,5 @@ __pycache__/
 .env*
 !.env.example
 etl/cache/
-etl/out/
+etl/out/*
+!etl/out/supabase/

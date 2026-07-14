@@ -1,0 +1,109 @@
+name: ETL refresh
+
+on:
+  workflow_dispatch:
+    inputs:
+      city:
+        description: "City slug"
+        default: "chicago"
+  schedule:
+    - cron: "17 7 * * 1" # weekly, Monday 07:17 UTC (crime cadence; other sources no-op via cache/vintages)
+
+permissions:
+  contents: write
+
+concurrency:
+  group: etl-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  etl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    services:
+      postgis:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: etl
+          POSTGRES_PASSWORD: etl
+          POSTGRES_DB: citydata_etl
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U etl -d citydata_etl"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      ETL_DATABASE_URL: postgresql://etl:etl@localhost:5432/citydata_etl
+      CENSUS_API_KEY: ${{ secrets.CENSUS_API_KEY }}
+      SOCRATA_APP_TOKEN: ${{ secrets.SOCRATA_APP_TOKEN }}
+      CITY: ${{ inputs.city || 'chicago' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install ETL
+        working-directory: etl
+        run: uv sync --frozen || uv sync
+
+      - name: Geo spine (tracts, blocks, neighborhoods)
+        working-directory: etl
+        run: uv run python -m etl catalog && uv run python -m etl geo-spine --city "$CITY"
+      - name: Crosswalk (block-population weighted)
+        working-directory: etl
+        run: uv run python -m etl crosswalk --city "$CITY"
+
+      - name: Crime (Socrata)
+        working-directory: etl
+        continue-on-error: true
+        run: uv run python -m etl crime --city "$CITY"
+      - name: Zillow ZHVI/ZORI + HUD crosswalk
+        working-directory: etl
+        continue-on-error: true
+        run: uv run python -m etl zillow --city "$CITY"
+      - name: FEMA NRI
+        working-directory: etl
+        continue-on-error: true
+        run: uv run python -m etl fema-nri --city "$CITY"
+      - name: CDC PLACES
+        working-directory: etl
+        continue-on-error: true
+        run: uv run python -m etl cdc-places --city "$CITY"
+      - name: FEMA NFHL flood zones
+        working-directory: etl
+        continue-on-error: true
+        run: uv run python -m etl nfhl --city "$CITY"
+      - name: Schools (Urban Institute)
+        working-directory: etl
+        continue-on-error: true
+        run: uv run python -m etl schools --city "$CITY"
+      - name: GTFS transit
+        working-directory: etl
+        continue-on-error: true
+        run: uv run python -m etl gtfs --city "$CITY"
+      - name: POIs (Overture) + walkability
+        working-directory: etl
+        continue-on-error: true
+        run: uv run python -m etl pois --city "$CITY" && uv run python -m etl walkability --city "$CITY"
+      - name: ACS (needs CENSUS_API_KEY secret)
+        working-directory: etl
+        continue-on-error: true
+        run: uv run python -m etl acs --city "$CITY"
+
+      - name: Percentiles + bundle + Supabase export
+        working-directory: etl
+        run: |
+          uv run python -m etl percentiles --city "$CITY"
+          uv run python -m etl bundle --city "$CITY"
+          uv run python -m etl export --city "$CITY"
+
+      - name: Commit refreshed data
+        run: |
+          git config user.name "etl-bot"
+          git config user.email "etl-bot@users.noreply.github.com"
+          git add apps/web/public/bundles etl/out/supabase
+          if git diff --cached --quiet; then
+            echo "no data changes"
+          else
+            git commit -m "data: ETL refresh ($CITY) [skip ci]"
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi

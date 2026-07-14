@@ -5,6 +5,7 @@ import sys
 
 JOBS = {
     "smoke": "etl.jobs.smoke",
+    "catalog": "etl.build.catalog",
     "geo-spine": "etl.geo.spine",
     "crosswalk": "etl.geo.crosswalk",
     "crime": "etl.sources.socrata_crime",
