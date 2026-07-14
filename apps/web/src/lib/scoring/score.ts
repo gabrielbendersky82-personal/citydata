@@ -108,6 +108,12 @@ export function scoreAll(input: ScoreInput): ScoredNeighborhood[] {
       let coverage = 0;
       let metricExplains: MetricExplain[] = [];
 
+      // criteria the city has no data for at all (sliders disabled in the UI)
+      // are excluded entirely — they shouldn't drag confidence to zero.
+      if (k === PLACES_CRITERION ? pins.length === 0 : (metricsByCriterion.get(k)?.length ?? 0) === 0) {
+        continue;
+      }
+
       if (k === PLACES_CRITERION) {
         if (pins.length) {
           let num = 0;
