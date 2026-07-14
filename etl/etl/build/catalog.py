@@ -60,6 +60,7 @@ def seed(c) -> int:
 
 def run(city: str, extra: list[str]) -> int:
     with db.conn() as c:
+        db.apply_schema(c)
         n = seed(c)
         c.commit()
     print(f"metric catalog seeded: {n} metrics")
