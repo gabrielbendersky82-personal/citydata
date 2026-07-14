@@ -1,0 +1,25 @@
+[project]
+name = "citydata-etl"
+version = "0.1.0"
+description = "ETL pipelines for the citydata neighborhood-fit app"
+requires-python = ">=3.11"
+dependencies = [
+    "geopandas>=1.0",
+    "shapely>=2.0",
+    "pyproj>=3.6",
+    "requests>=2.32",
+    "psycopg[binary]>=3.2",
+    "pyyaml>=6.0",
+    "pandas>=2.2",
+    "pyarrow>=17",
+]
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["etl"]

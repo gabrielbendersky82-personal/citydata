@@ -1,0 +1,74 @@
+# City adapter config: Chicago
+city:
+  id: 1
+  slug: chicago
+  name: Chicago
+  state: IL
+  place_geoid: "1714000"   # Census place FIPS
+  county_fips: "17031"     # Cook County (tract/block universe)
+  state_fips: "17"
+
+neighborhoods:
+  source: city_official
+  # Community Areas (77), official city boundaries
+  url: "https://data.cityofchicago.org/api/geospatial/cauq-8yn6?method=export&format=GeoJSON"
+  name_field: community
+
+crime:
+  portal: data.cityofchicago.org
+  dataset_id: ijzp-q8t2          # Crimes - 2001 to Present
+  fields:
+    timestamp: date
+    lat: latitude
+    lon: longitude
+    category: primary_type
+    row_id: id
+  window_years: 3
+  # Map the portal's primary_type into the common taxonomy.
+  category_map:
+    violent:
+      - HOMICIDE
+      - CRIMINAL SEXUAL ASSAULT
+      - CRIM SEXUAL ASSAULT
+      - ROBBERY
+      - BATTERY
+      - ASSAULT
+      - KIDNAPPING
+      - HUMAN TRAFFICKING
+      - INTIMIDATION
+    property:
+      - BURGLARY
+      - THEFT
+      - MOTOR VEHICLE THEFT
+      - ARSON
+      - CRIMINAL DAMAGE
+      - CRIMINAL TRESPASS
+      - DECEPTIVE PRACTICE
+    qol:
+      - NARCOTICS
+      - OTHER NARCOTIC VIOLATION
+      - PROSTITUTION
+      - PUBLIC PEACE VIOLATION
+      - WEAPONS VIOLATION
+      - GAMBLING
+      - LIQUOR LAW VIOLATION
+      - PUBLIC INDECENCY
+      - INTERFERENCE WITH PUBLIC OFFICER
+      - OBSCENITY
+      - STALKING
+      - CONCEALED CARRY LICENSE VIOLATION
+    # anything unmapped -> 'qol' with a warning
+
+zillow:
+  # Region names in Zillow neighborhood CSVs that map to community-area slugs
+  # are reviewed into this file by the name-match job:
+  neighborhood_match_file: configs/chicago_zillow_match.yaml
+  metro_name: "Chicago, IL"
+
+gtfs:
+  agencies:
+    - name: cta
+      static_url: "https://www.transitchicago.com/downloads/sch_data/google_transit.zip"
+
+osm:
+  geofabrik_extract: "https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf"
