@@ -11,6 +11,8 @@ neighborhoods:
   url: https://data.cityofchicago.org/api/geospatial/cauq-8yn6?method=export&format=GeoJSON
   name_field: community
   dev_mirrors:
+  - https://data.cityofchicago.org/resource/igwz-8jzy.geojson?$limit=200
+  - https://data.cityofchicago.org/resource/cauq-8yn6.geojson?$limit=200
   - https://raw.githubusercontent.com/thisisdaryn/data/master/geo/chicago/Comm_Areas.geojson
 crime:
   portal: data.cityofchicago.org

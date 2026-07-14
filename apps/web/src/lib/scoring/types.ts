@@ -46,7 +46,7 @@ export interface Bundle {
   metricsMeta: Record<string, MetricMeta>;
   cityMedians: Record<string, number | null>;
   neighborhoods: Neighborhood[];
-  geojson: GeoJSON.FeatureCollection;
+  geojson: import("geojson").FeatureCollection;
 }
 
 /** User weights per criterion slider, 0-5. */

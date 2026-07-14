@@ -31,6 +31,7 @@ def download(
     filename: str,
     mirrors: list[str] | None = None,
     timeout: int = 300,
+    validate=None,
 ) -> tuple[str, str]:
     """Download to etl/cache/<filename><ext-of-source-used> unless cached.
 
@@ -61,6 +62,13 @@ def download(
                     for chunk in r.iter_content(chunk_size=1 << 20):
                         f.write(chunk)
             os.replace(tmp, path)
+            if validate is not None:
+                try:
+                    validate(path)
+                except Exception as e:
+                    errors.append(f"{candidate}: invalid content ({e.__class__.__name__})")
+                    os.remove(path)
+                    continue
             with open(meta, "w") as f:
                 f.write(candidate)
             if candidate != url:

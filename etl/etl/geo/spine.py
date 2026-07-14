@@ -93,10 +93,14 @@ def load_blocks(c, cfg) -> int:
 def load_neighborhoods(c, cfg) -> int:
     n_cfg = cfg["neighborhoods"]
     city_id = cfg["city"]["id"]
+    def _validate(p: str) -> None:
+        gpd.read_file(p, rows=1)
+
     path, used = download(
         n_cfg["url"],
         f"{cfg['city']['slug']}_neighborhoods.geojson",
         mirrors=n_cfg.get("dev_mirrors"),
+        validate=_validate,
     )
     hoods = gpd.read_file(path)
     if hoods.crs is None:
