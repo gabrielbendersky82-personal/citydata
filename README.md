@@ -59,6 +59,15 @@ block weighting, and commits the refreshed bundle + exports back to the branch.
 | `SOCRATA_APP_TOKEN` | polite crime-API rate limits (optional) | free at any Socrata portal |
 | `HUD_API_TOKEN` | residential-ratio ZIP↔tract crosswalk (optional; Census area-ratio fallback used otherwise) | free at huduser.gov |
 
+## Deploying
+
+Import this repo in Vercel (vercel.com/new), set **Root Directory** to
+`apps/web`, and deploy — no env vars required (the app serves the committed
+data bundle statically). Every ETL refresh commit then auto-deploys.
+Optionally add `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+to enable accounts/saved profiles once the Supabase project exists
+(migrations in `supabase/migrations/`, data loads in `etl/out/supabase/`).
+
 ## Data & scoring in one paragraph
 
 All authoritative metrics are stored at census-tract level and rolled up to
