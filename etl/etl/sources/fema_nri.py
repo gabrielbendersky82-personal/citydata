@@ -21,6 +21,11 @@ from etl.config import load_city
 from etl.fetch import UA, AllSourcesBlocked, download
 
 ARCGIS_ROOT = "https://hazards.fema.gov/arcgis/rest/services"
+# FEMA's ArcGIS Online org hosts NRI feature layers (post-RAPT home); tried first
+AGOL_CANDIDATES = [
+    "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Census_Tracts/FeatureServer",
+    "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/NRI_CensusTracts/FeatureServer",
+]
 LEGACY_URL = "https://hazards.fema.gov/nri/Content/StaticDocuments/DataDownload//NRI_Table_CensusTracts/NRI_Table_CensusTracts.zip"
 
 COLUMN_METRICS = {
@@ -39,7 +44,18 @@ def _get(url: str, **params) -> dict:
 
 
 def discover_service() -> tuple[str, int] | None:
-    """Find the NRI census-tract layer under the public ArcGIS folders."""
+    """Find the NRI census-tract layer: known AGOL homes first, then the
+    hazards.fema.gov ArcGIS folders."""
+    for svc_url in AGOL_CANDIDATES:
+        try:
+            meta = _get(svc_url)
+            if "error" in meta:  # AGOL 200s with an error body for unknown services
+                continue
+            layers = meta.get("layers") or [{"id": 0, "name": meta.get("name", "layer0")}]
+            print(f"  NRI service (AGOL): {svc_url} layer {layers[0]['id']}")
+            return svc_url, layers[0]["id"]
+        except requests.RequestException:
+            continue
     try:
         root = _get(ARCGIS_ROOT)
         folders = [""] + root.get("folders", [])
@@ -57,6 +73,7 @@ def discover_service() -> tuple[str, int] | None:
                         return svc_url, layer["id"]
     except requests.RequestException as e:
         print(f"  ArcGIS discovery failed: {e.__class__.__name__}")
+    print("  no NRI service found on AGOL candidates or hazards.fema.gov folders")
     return None
 
 
