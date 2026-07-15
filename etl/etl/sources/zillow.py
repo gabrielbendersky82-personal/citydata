@@ -13,8 +13,15 @@ from etl.build.rollup import rollup
 from etl.config import load_city
 from etl.fetch import download
 
-ZHVI_ZIP_URL = "https://files.zillowstatic.com/research/public_csvs/zhvi/Zip_zhvi_uc_sfrcondo_tier_0.33_0.67_sm_sa_month.csv"
-ZORI_ZIP_URL = "https://files.zillowstatic.com/research/public_csvs/zori/Zip_zori_uc_sfrcondo_sm_sa_month.csv"
+ZHVI_URLS = [
+    "https://files.zillowstatic.com/research/public_csvs/zhvi/Zip_zhvi_uc_sfrcondo_tier_0.33_0.67_sm_sa_month.csv",
+]
+# ZORI's product code is sfrcondomfr (SFR + condo + multifamily); naming has drifted before
+ZORI_URLS = [
+    "https://files.zillowstatic.com/research/public_csvs/zori/Zip_zori_uc_sfrcondomfr_sm_sa_month.csv",
+    "https://files.zillowstatic.com/research/public_csvs/zori/Zip_zori_uc_sfrcondomfr_sm_month.csv",
+    "https://files.zillowstatic.com/research/public_csvs/zori/Zip_zori_uc_sfrcondo_sm_sa_month.csv",
+]
 
 import os
 
@@ -106,13 +113,17 @@ def run(city: str, extra: list[str]) -> int:
         hud_vintage = load_hud_xwalk(c, state_fips)
         vid = db.ensure_dataset_version(c, "zillow", f"zip_{pd.Timestamp.utcnow():%Y%m}_hud{hud_vintage}")
 
-        n = 0
-        for url, key in ((ZHVI_ZIP_URL, "zhvi"), (ZORI_ZIP_URL, "zori")):
-            path, _ = download(url, f"zillow_{key}_zip")
-            vals = latest_value_by_zip(path, city_name, state)
-            n += apportion_to_tracts(c, vals, key, vid, state_fips)
-            print(f"  {key}: {len(vals)} ZIPs -> tract metrics")
-        rolled = rollup(c, city_id, ["zhvi", "zori"], vid, vid)
+        n, loaded = 0, []
+        for urls, key in ((ZHVI_URLS, "zhvi"), (ZORI_URLS, "zori")):
+            try:
+                path, _ = download(urls[0], f"zillow_{key}_zip", mirrors=urls[1:])
+                vals = latest_value_by_zip(path, city_name, state)
+                n += apportion_to_tracts(c, vals, key, vid, state_fips)
+                loaded.append(key)
+                print(f"  {key}: {len(vals)} ZIPs -> tract metrics")
+            except Exception as e:  # one series failing must not lose the other
+                print(f"WARN: {key} skipped: {e}")
+        rolled = rollup(c, city_id, loaded, vid, vid) if loaded else 0
         db.finish_dataset_version(c, vid, n)
         c.commit()
         print(f"zillow: {n} tract metrics, {rolled} neighborhood rollups")

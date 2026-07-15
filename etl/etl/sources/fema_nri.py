@@ -31,17 +31,26 @@ def discover_nri_url() -> list[str]:
 
     override = os.environ.get("NRI_URL")
     candidates = [override] if override else []
+    import re
+
     for page in DISCOVERY_PAGES:
         try:
             html = rq.get(page, headers={"User-Agent": UA}, timeout=60).text
-            import re
-
-            for m in re.findall(r'href="([^"]*NRI[^"]*Tracts[^"]*\.zip)"', html, re.I):
+            # match anywhere (pages are JS-heavy; links live in inline JSON too)
+            for m in re.findall(r'https?://[^"\'\s\\]*NRI[^"\'\s\\]*Tract[^"\'\s\\]*\.zip', html, re.I):
+                candidates.append(m)
+            for m in re.findall(r'["\']([^"\']*DataDownload[^"\']*Tract[^"\']*\.zip)["\']', html, re.I):
                 candidates.append(m if m.startswith("http") else f"https://hazards.fema.gov{m}")
-        except rq.RequestException:
-            continue
-    candidates.append(LEGACY_URL)
-    return list(dict.fromkeys(candidates))
+        except rq.RequestException as e:
+            print(f"  discovery page failed: {page} ({e.__class__.__name__})")
+    candidates += [
+        LEGACY_URL,
+        LEGACY_URL.replace("DataDownload//", "DataDownload/"),
+        "https://hazards.fema.gov/nri/Content/Data/NRI_Table_CensusTracts.zip",
+    ]
+    out = list(dict.fromkeys(c for c in candidates if c))
+    print(f"  NRI candidates: {out}")
+    return out
 
 COLUMN_METRICS = {
     "RISK_SCORE": "nri_risk_score",
