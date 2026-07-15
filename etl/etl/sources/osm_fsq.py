@@ -84,19 +84,33 @@ def run(city: str, extra: list[str]) -> int:
             (f(("bbox", "xmin")) > xmin) & (f(("bbox", "xmax")) < xmax)
             & (f(("bbox", "ymin")) > ymin) & (f(("bbox", "ymax")) < ymax)
         )
-        total = 0
+        total, failed_files = 0, 0
         for i, url in enumerate(files):
-            d = ds.dataset(url, filesystem=fs, format="parquet")
-            tbl = d.to_table(
-                columns={
-                    "id": f("id"),
-                    "cat": f(("categories", "primary")),
-                    "name": f(("names", "primary")),
-                    "lon": f(("bbox", "xmin")),
-                    "lat": f(("bbox", "ymin")),
-                },
-                filter=expr,
-            )
+            tbl = None
+            for attempt in range(3):  # S3-over-HTTP reads flake occasionally
+                try:
+                    d = ds.dataset(url, filesystem=fs, format="parquet")
+                    tbl = d.to_table(
+                        columns={
+                            "id": f("id"),
+                            "cat": f(("categories", "primary")),
+                            "name": f(("names", "primary")),
+                            "lon": f(("bbox", "xmin")),
+                            "lat": f(("bbox", "ymin")),
+                        },
+                        filter=expr,
+                    )
+                    break
+                except Exception as e:
+                    if attempt == 2:
+                        print(f"WARN: file {i + 1}/{len(files)} failed after retries ({e.__class__.__name__}); continuing")
+                        failed_files += 1
+                    else:
+                        import time
+
+                        time.sleep(3 * (attempt + 1))
+            if tbl is None:
+                continue
             if not tbl.num_rows:
                 continue
             rows = []
@@ -124,5 +138,7 @@ def run(city: str, extra: list[str]) -> int:
             print(f"  file {i + 1}/{len(files)}: +{len(rows)} (total {total})")
         db.finish_dataset_version(c, vid, total)
         c.commit()
-        print(f"overture places: {total} POIs in city bbox")
+        print(f"overture places: {total} POIs in city bbox ({failed_files} files skipped)")
+        if total == 0:
+            raise RuntimeError("no POIs ingested — refusing to publish empty walkability")
     return 0
