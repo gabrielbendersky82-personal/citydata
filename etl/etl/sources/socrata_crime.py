@@ -42,55 +42,85 @@ def run(city: str, extra: list[str]) -> int:
     base = f"https://{crime['portal']}/resource/{crime['dataset_id']}.json"
     select = ",".join([fields["row_id"], fields["timestamp"], fields["lat"], fields["lon"], fields["category"]])
 
+    def fetch_page(params: dict) -> list[dict]:
+        # Socrata gets slow/flaky on big queries — retry with backoff
+        for attempt in range(4):
+            try:
+                r = requests.get(base, params=params, headers=headers, timeout=240)
+                r.raise_for_status()
+                return r.json()
+            except requests.RequestException as e:
+                if attempt == 3:
+                    raise
+                wait = 5 * 2**attempt
+                print(f"  retry {attempt + 1} after {e.__class__.__name__} (sleep {wait}s)")
+                import time
+
+                time.sleep(wait)
+        return []
+
+    # month windows avoid deep $offset pagination, which times out at scale
+    def month_windows(start: datetime) -> list[tuple[str, str]]:
+        out = []
+        cur = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = datetime.now(timezone.utc)
+        while cur < end:
+            nxt = (cur.replace(day=28) + timedelta(days=5)).replace(day=1)
+            out.append((cur.strftime("%Y-%m-%dT00:00:00"), nxt.strftime("%Y-%m-%dT00:00:00")))
+            cur = nxt
+        return out
+
     with db.conn() as c:
         vid = db.ensure_dataset_version(c, "socrata_crime", f"{city}_{since[:10]}_w{window_years}y")
-        offset, total, unmapped = 0, 0, set()
-        while True:
-            params = {
-                "$select": select,
-                "$where": f"{fields['timestamp']} >= '{since}'",
-                "$order": fields["row_id"],
-                "$limit": PAGE,
-                "$offset": offset,
-            }
-            r = requests.get(base, params=params, headers=headers, timeout=180)
-            r.raise_for_status()
-            batch = r.json()
-            if not batch:
-                break
-            rows = []
-            for rec in batch:
-                lat, lon = rec.get(fields["lat"]), rec.get(fields["lon"])
-                if not lat or not lon:
-                    continue
-                src_cat = str(rec.get(fields["category"], "")).upper()
-                bucket = lookup.get(src_cat)
-                if bucket is None:
-                    unmapped.add(src_cat)
-                    bucket = "qol"
-                rows.append(
-                    (
-                        city_id,
-                        str(rec[fields["row_id"]]),
-                        rec[fields["timestamp"]],
-                        bucket,
-                        src_cat,
-                        f"SRID=4326;POINT({float(lon)} {float(lat)})",
-                        vid,
-                    )
+        total, unmapped = 0, set()
+        windows = month_windows(datetime.now(timezone.utc) - timedelta(days=365 * window_years))
+        for w_start, w_end in windows:
+            offset = 0
+            while True:
+                batch = fetch_page(
+                    {
+                        "$select": select,
+                        "$where": f"{fields['timestamp']} >= '{w_start}' and {fields['timestamp']} < '{w_end}'",
+                        "$order": fields["row_id"],
+                        "$limit": PAGE,
+                        "$offset": offset,
+                    }
                 )
-            total += db.upsert_rows(
-                c,
-                "staging.crime_incidents",
-                ["city_id", "source_row_id", "occurred_at", "category", "source_category", "geom", "dataset_version_id"],
-                rows,
-                ["city_id", "source_row_id"],
-            )
-            c.commit()
-            print(f"  crime page offset={offset} -> total {total}")
-            offset += PAGE
-            if len(batch) < PAGE:
-                break
+                if not batch:
+                    break
+                rows = []
+                for rec in batch:
+                    lat, lon = rec.get(fields["lat"]), rec.get(fields["lon"])
+                    if not lat or not lon:
+                        continue
+                    src_cat = str(rec.get(fields["category"], "")).upper()
+                    bucket = lookup.get(src_cat)
+                    if bucket is None:
+                        unmapped.add(src_cat)
+                        bucket = "qol"
+                    rows.append(
+                        (
+                            city_id,
+                            str(rec[fields["row_id"]]),
+                            rec[fields["timestamp"]],
+                            bucket,
+                            src_cat,
+                            f"SRID=4326;POINT({float(lon)} {float(lat)})",
+                            vid,
+                        )
+                    )
+                total += db.upsert_rows(
+                    c,
+                    "staging.crime_incidents",
+                    ["city_id", "source_row_id", "occurred_at", "category", "source_category", "geom", "dataset_version_id"],
+                    rows,
+                    ["city_id", "source_row_id"],
+                )
+                c.commit()
+                offset += PAGE
+                if len(batch) < PAGE:
+                    break
+            print(f"  crime window {w_start[:7]} done -> total {total}")
         if unmapped:
             print(f"WARN: unmapped categories bucketed as qol: {sorted(unmapped)[:20]}")
 

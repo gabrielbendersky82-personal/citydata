@@ -86,6 +86,9 @@ export function CityApp({ city }: { city: string }) {
           <Link href="/data" className="text-xs underline" style={{ color: "var(--ink-muted)" }}>
             Data & methodology
           </Link>
+          <Link href="/account" className="text-xs underline" style={{ color: "var(--ink-muted)" }}>
+            Account
+          </Link>
         </div>
       </header>
 

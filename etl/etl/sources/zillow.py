@@ -15,17 +15,45 @@ from etl.fetch import download
 
 ZHVI_ZIP_URL = "https://files.zillowstatic.com/research/public_csvs/zhvi/Zip_zhvi_uc_sfrcondo_tier_0.33_0.67_sm_sa_month.csv"
 ZORI_ZIP_URL = "https://files.zillowstatic.com/research/public_csvs/zori/Zip_zori_uc_sfrcondo_sm_sa_month.csv"
-# HUD USPS crosswalk quarterly file (public download); quarter is bumped by the ETL calendar
-HUD_XWALK_URL = "https://www.huduser.gov/portal/datasets/usps/ZIP_TRACT_032026.xlsx"
+
+import os
+
+import requests
+
+from etl.fetch import UA
+
+# HUD USPS ZIP↔tract crosswalk via the HUD API (residential ratios; preferred,
+# needs free HUD_API_TOKEN). Fallback: Census 2020 ZCTA↔tract relationship file
+# (no auth; land-area shares as the ratio proxy, vintage-flagged).
+HUD_API = "https://www.huduser.gov/hudapi/public/usps"
+CENSUS_REL_URL = "https://www2.census.gov/geo/docs/maps-data/data/rel2020/zcta520/tab20_zcta520_tract20_natl.txt"
 
 
 def load_hud_xwalk(c, state_fips: str) -> str:
-    vintage = HUD_XWALK_URL.rsplit("_", 1)[-1].split(".")[0]
-    path, _ = download(HUD_XWALK_URL, f"hud_zip_tract_{vintage}")
-    df = pd.read_excel(path, dtype={"ZIP": str, "TRACT": str, "zip": str, "tract": str})
-    df.columns = [col.lower() for col in df.columns]
-    df = df[df["tract"].str.startswith(state_fips)]
-    rows = [(r.zip, r.tract, float(r.res_ratio), vintage) for r in df.itertuples()]
+    token = os.environ.get("HUD_API_TOKEN")
+    if token:
+        r = requests.get(
+            HUD_API,
+            params={"type": 1, "query": "All", "year": pd.Timestamp.utcnow().year},
+            headers={"Authorization": f"Bearer {token}", "User-Agent": UA},
+            timeout=300,
+        )
+        r.raise_for_status()
+        vintage = f"hud_{pd.Timestamp.utcnow():%Y}"
+        rows = [
+            (rec["zip"], rec["geoid"], float(rec["res_ratio"]), vintage)
+            for rec in r.json()["data"]["results"]
+            if str(rec["geoid"]).startswith(state_fips)
+        ]
+    else:
+        path, _ = download(CENSUS_REL_URL, "zcta520_tract20_rel")
+        df = pd.read_csv(path, sep="|", dtype=str, usecols=["GEOID_ZCTA5_20", "GEOID_TRACT_20", "AREALAND_PART"])
+        df = df[df["GEOID_TRACT_20"].str.startswith(state_fips) & df["GEOID_ZCTA5_20"].notna()]
+        df["AREALAND_PART"] = df["AREALAND_PART"].astype(float)
+        totals = df.groupby("GEOID_ZCTA5_20")["AREALAND_PART"].transform("sum")
+        df["ratio"] = df["AREALAND_PART"] / totals.where(totals > 0, 1)
+        vintage = "zcta520_rel_area"
+        rows = [(r.GEOID_ZCTA5_20, r.GEOID_TRACT_20, float(r.ratio), vintage) for r in df.itertuples()]
     db.upsert_rows(c, "zip_tract_xwalk", ["zip", "tract_geoid", "res_ratio", "vintage"], rows,
                    ["zip", "tract_geoid", "vintage"])
     return vintage

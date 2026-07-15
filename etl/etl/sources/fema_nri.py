@@ -15,10 +15,33 @@ from etl.build.rollup import rollup
 from etl.config import load_city
 from etl.fetch import download
 
-NRI_URL = os.environ.get(
-    "NRI_URL",
-    "https://hazards.fema.gov/nri/Content/StaticDocuments/DataDownload//NRI_Table_CensusTracts/NRI_Table_CensusTracts.zip",
-)
+LEGACY_URL = "https://hazards.fema.gov/nri/Content/StaticDocuments/DataDownload//NRI_Table_CensusTracts/NRI_Table_CensusTracts.zip"
+DISCOVERY_PAGES = [
+    "https://hazards.fema.gov/nri/data-resources",
+    "https://www.fema.gov/flood-maps/products-tools/national-risk-index",
+]
+
+
+def discover_nri_url() -> list[str]:
+    """NRI's download location has moved before (RAPT consolidation) — discover
+    the census-tract table link from FEMA's pages, falling back to known URLs."""
+    import requests as rq
+
+    from etl.fetch import UA
+
+    override = os.environ.get("NRI_URL")
+    candidates = [override] if override else []
+    for page in DISCOVERY_PAGES:
+        try:
+            html = rq.get(page, headers={"User-Agent": UA}, timeout=60).text
+            import re
+
+            for m in re.findall(r'href="([^"]*NRI[^"]*Tracts[^"]*\.zip)"', html, re.I):
+                candidates.append(m if m.startswith("http") else f"https://hazards.fema.gov{m}")
+        except rq.RequestException:
+            continue
+    candidates.append(LEGACY_URL)
+    return list(dict.fromkeys(candidates))
 
 COLUMN_METRICS = {
     "RISK_SCORE": "nri_risk_score",
@@ -33,7 +56,8 @@ def run(city: str, extra: list[str]) -> int:
     city_id = cfg["city"]["id"]
     state_fips = cfg["city"]["state_fips"]
 
-    path, _ = download(NRI_URL, "nri_tracts")
+    urls = discover_nri_url()
+    path, _ = download(urls[0], "nri_tracts", mirrors=urls[1:])
     with zipfile.ZipFile(path) as z:
         csv_name = next(n for n in z.namelist() if n.lower().endswith(".csv"))
         with z.open(csv_name) as f:
