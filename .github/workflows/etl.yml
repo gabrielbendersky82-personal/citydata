@@ -95,6 +95,21 @@ jobs:
           uv run python -m etl bundle --city "$CITY"
           uv run python -m etl export --city "$CITY"
 
+      - name: Sync Supabase (schema + serving data)
+        if: ${{ secrets.SUPABASE_DB_URL != '' }}
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          for f in supabase/migrations/*.sql; do
+            echo "applying $f"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+          for f in etl/out/supabase/*.sql; do
+            echo "loading $f"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+          psql "$SUPABASE_DB_URL" -t -c "select 'supabase rows: neighborhoods='||count(*) from neighborhoods"
+
       - name: Commit refreshed data
         run: |
           git config user.name "etl-bot"
